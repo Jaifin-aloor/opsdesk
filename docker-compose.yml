@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: opsdesk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: opsdesk
+      POSTGRES_USER: opsdesk_user
+      POSTGRES_PASSWORD: local_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - opsdesk_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opsdesk_user -d opsdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: opsdesk-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - opsdesk_redisdata:/data
+
+volumes:
+  opsdesk_pgdata:
+  opsdesk_redisdata:
