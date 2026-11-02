@@ -108,3 +108,120 @@ export async function createDispute(
     client.release();
   }
 }
+
+
+
+export async function batchApproveDisputes(
+  disputeIds: number[],
+  performedBy: string
+) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const locked = await client.query(
+      `SELECT id
+       FROM disputes
+       WHERE id = ANY($1::bigint[])
+         AND status IN ('PENDING', 'MANUAL_REVIEW')
+       FOR UPDATE`,
+      [disputeIds]
+    );
+
+    if (locked.rows.length !== disputeIds.length) {
+      await client.query("ROLLBACK");
+      return { conflict: true };
+    }
+
+    const updated = await client.query(
+      `UPDATE disputes
+       SET status = 'APPROVED',
+           resolved_at = NOW(),
+           reason_code = NULL
+       WHERE id = ANY($1::bigint[])
+       RETURNING id`,
+      [disputeIds]
+    );
+
+    for (const dispute of updated.rows) {
+      await client.query(
+        `INSERT INTO audit_logs
+           (dispute_id, action_taken, performed_by)
+         VALUES ($1, $2, $3)`,
+        [dispute.id, "APPROVED", performedBy]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      conflict: false,
+      approvedCount: updated.rows.length,
+      approvedIds: updated.rows.map((row) => row.id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function batchRejectDisputes(
+  disputeIds: number[],
+  reasonCode: string,
+  performedBy: string
+) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const locked = await client.query(
+      `SELECT id
+       FROM disputes
+       WHERE id = ANY($1::bigint[])
+         AND status IN ('PENDING', 'MANUAL_REVIEW')
+       FOR UPDATE`,
+      [disputeIds]
+    );
+
+    if (locked.rows.length !== disputeIds.length) {
+      await client.query("ROLLBACK");
+      return { conflict: true };
+    }
+
+    const updated = await client.query(
+      `UPDATE disputes
+       SET status = 'REJECTED',
+           reason_code = $2,
+           resolved_at = NOW()
+       WHERE id = ANY($1::bigint[])
+       RETURNING id`,
+      [disputeIds, reasonCode]
+    );
+
+    for (const dispute of updated.rows) {
+      await client.query(
+        `INSERT INTO audit_logs
+           (dispute_id, action_taken, performed_by)
+         VALUES ($1, $2, $3)`,
+        [dispute.id, `REJECTED: ${reasonCode}`, performedBy]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      conflict: false,
+      rejectedCount: updated.rows.length,
+      rejectedIds: updated.rows.map((row) => row.id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

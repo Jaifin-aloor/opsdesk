@@ -6,6 +6,8 @@ import {
   getOpenDisputes,
   getDisputeById,
   createDispute,
+  batchApproveDisputes,
+  batchRejectDisputes,
 } from "../services/dispute.service";
 
 export const disputeRouter = Router();
@@ -14,6 +16,27 @@ const createDisputeSchema = z.object({
   merchantId: z.number().int().positive(),
   amount: z.number().positive(),
   customerReason: z.string().trim().min(3).max(500),
+});
+
+const batchApproveSchema = z.object({
+  disputeIds: z.array(z.number().int().positive())
+    .min(1)
+    .max(100)
+    .refine((ids) => new Set(ids).size === ids.length),
+  performedBy: z.string().trim().min(1),
+});
+
+const batchRejectSchema = z.object({
+  disputeIds: z.array(z.number().int().positive())
+    .min(1)
+    .max(100)
+    .refine((ids) => new Set(ids).size === ids.length),
+  reasonCode: z.enum([
+    "CUSTOMER_NOT_ELIGIBLE",
+    "DUPLICATE_CLAIM",
+    "INSUFFICIENT_EVIDENCE",
+  ]),
+  performedBy: z.string().trim().min(1),
 });
 
 // GET /api/disputes
@@ -34,6 +57,60 @@ disputeRouter.get(
       page,
       limit,
       data: disputes,
+    });
+  })
+);
+
+// POST /api/disputes/batch/approve
+disputeRouter.post(
+  "/batch/approve",
+  validateBody(batchApproveSchema),
+  asyncHandler(async (req, res) => {
+    const { disputeIds, performedBy } = req.body;
+
+    const result = await batchApproveDisputes(
+      disputeIds,
+      performedBy
+    );
+
+    if (result.conflict) {
+      res.status(409).json({
+        error: "One or more disputes are missing or already resolved",
+      });
+      return;
+    }
+
+    res.json({
+      message: "Disputes approved successfully",
+      ...result,
+    });
+  })
+);
+
+
+// POST /api/disputes/batch/reject
+disputeRouter.post(
+  "/batch/reject",
+  validateBody(batchRejectSchema),
+  asyncHandler(async (req, res) => {
+    const { disputeIds, reasonCode, performedBy } = req.body;
+
+    const result = await batchRejectDisputes(
+      disputeIds,
+      reasonCode,
+      performedBy
+    );
+
+    if (result.conflict) {
+      res.status(409).json({
+        error: "One or more disputes are missing or already resolved",
+      });
+      return;
+    }
+
+    res.json({
+      message: "Disputes rejected successfully",
+      ...result,
     });
   })
 );
