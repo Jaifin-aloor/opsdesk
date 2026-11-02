@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { disputeQueue } from "../queues/dispute.queue";
 
 export async function getOpenDisputes(limit: number, offset: number) {
   const result = await pool.query(
@@ -83,6 +84,21 @@ export async function createDispute(
     );
 
     await client.query("COMMIT");
+
+    await disputeQueue.add(
+    "evaluate-dispute",
+    { disputeId: dispute.id },
+    {
+        jobId: `dispute-${dispute.id}`,
+        attempts: 3,
+        backoff: {
+        type: "exponential",
+        delay: 2000,
+        },
+        removeOnComplete: 500,
+        removeOnFail: 1000,
+    }
+    );
 
     return dispute;
   } catch (error) {
